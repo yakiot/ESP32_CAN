@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include <ESP32-TWAI-CAN.hpp>
+#include "constants.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -20,6 +21,9 @@ static uint32_t lastRpmNotify = 0;
 static uint32_t lastSpeedNotify = 0;
 static uint32_t lastFuelNotify = 0;
 static uint32_t lastOdoNotify = 0;
+static uint32_t lastLoadNotify = 0;
+static uint32_t lastKeyNotify = 0;
+static uint32_t lastThrottleNotify = 0;
 static char vehicleVin[18] = {};
 static uint32_t lastVinNotify = 0;
 
@@ -143,6 +147,8 @@ static void finishObd(const uint8_t* data, size_t length, uint16_t source) {
       publishMetric("rpm", ((uint16_t(data[2]) << 8) | data[3]) / 4.0f, lastRpmNotify);
     } else if (pendingPid == 0x0D && length == 3) {
       publishMetric("speed", data[2], lastSpeedNotify);
+    } else if (pendingPid == 0x11 && length == 3) {
+      publishMetric("thr", data[2] * 100.0f / 255, lastThrottleNotify);
     } else if (pendingPid == 0x2F && length == 3) {
       publishMetric("fuel", data[2] * 100.0f / 255, lastFuelNotify);
     } else if (pendingPid == 0xA6 && length == 6) {
@@ -172,10 +178,11 @@ static void pollObd() {
     lastAuxRequest = now;
     if (!vinSupportChecked) { mode = 9; pid = 0; }
     else {
-      const uint8_t slot = auxSlot++ % 3;
+      const uint8_t slot = auxSlot++ % 4;
       if (slot == 0 && supported[0x2F]) pid = 0x2F;
       else if (slot == 1 && supported[0xA6]) pid = 0xA6;
-      else if (slot == 2 && vinSupported && !vehicleVin[0]) { mode = 9; pid = 2; }
+      else if (slot == 2 && supported[0x11]) pid = 0x11;
+      else if (slot == 3 && vinSupported && !vehicleVin[0]) { mode = 9; pid = 2; }
       else return;
     }
   } else return;
@@ -288,14 +295,19 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t lastLoopRun = 0;
+  const uint32_t now = millis();
+  if (now - lastLoopRun < LOOP_INTERVAL_S * 1000) return;
+  lastLoopRun = now;
+
   if (restartAdvertising.exchange(false)) BLEDevice::startAdvertising();
   publishVin();
   if (!canReady) { delay(10); return; }
 #ifdef PROTOCOL_OBD2
   pollObd();
 #endif
-  // Try to read a frame (10ms timeout to keep loop responsive)
-  if (ESP32Can.readFrame(rxFrame, 10)) {
+  // Drain all queued CAN frames each cycle; readFrame returns immediately when empty.
+  while (ESP32Can.readFrame(rxFrame, CAN_READ_TIMEOUT_MS)) {
 #ifdef PROTOCOL_OBD2
     receiveObd(rxFrame);
 #else
@@ -358,8 +370,36 @@ void loop() {
         if (raw < 0xFA000000UL) publishMetric("odo", raw * 0.125f, lastOdoNotify);
         break;
       }
-      case 0xFEFC: {
-        if (rxFrame.data[1] <= 250) publishMetric("fuel", rxFrame.data[1] * 0.4f, lastFuelNotify);
+      case 61443: {  // EEC2 — Accelerator Pedal Position 1 (SPN 91, byte 2, 0.4%/bit) + Engine % Load (SPN 92, byte 3)
+        if (rxFrame.data[1] <= 250) {
+          float pedalPct = rxFrame.data[1] * 0.4f;
+          publishMetric("thr", pedalPct, lastThrottleNotify);
+          Serial.printf("   [DECODED] Throttle: %.1f %%\n", pedalPct);
+        }
+        if (rxFrame.data[2] <= 0xFA) {
+          float loadPct = rxFrame.data[2] - 125.0f;
+          publishMetric("load", loadPct, lastLoadNotify);
+          Serial.printf("   [DECODED] Engine Load: %.0f %%\n", loadPct);
+        }
+        break;
+      }
+
+      case 65271: {  // VEP — Key Switch Battery Potential (SPN 158), bytes 7-8, 0.05 V/bit
+        uint16_t rawKey = ((uint16_t)rxFrame.data[7] << 8) | rxFrame.data[6];
+        if (rawKey <= 0xFAFF) {
+          float keyVolts = rawKey * 0.05f;
+          publishMetric("keyv", keyVolts, lastKeyNotify);
+          Serial.printf("   [DECODED] Keyswitch: %.1f V%s\n", keyVolts, keyVolts > 1.0f ? " — IGNITION ON" : "");
+        }
+        break;
+      }
+
+      case 0xFEFC: {  // Dash Display — Fuel Level 1 (SPN 96)
+        if (rxFrame.data[1] <= 250) {
+          float fuelPct = rxFrame.data[1] * 0.4f;
+          publishMetric("fuel", fuelPct, lastFuelNotify);
+          Serial.printf("   [DECODED] Fuel Level: %.1f %%\n", fuelPct);
+        }
         break;
       }
 
