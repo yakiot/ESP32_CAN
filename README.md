@@ -31,8 +31,36 @@ ESP32 + CAN-transceiver boards for bench development.
 
 ## Flashing
 
-Requires [PlatformIO](https://platformio.org/) (`pip install platformio`
-or the VS Code extension).
+Requires [PlatformIO](https://platformio.org/) — either the CLI (`pio`) or
+the VS Code extension.
+
+### Install PlatformIO
+
+**macOS**
+
+```bash
+brew install platformio-core        # Homebrew (recommended)
+# or with pip:
+pip3 install platformio
+```
+
+**Ubuntu / Debian**
+
+```bash
+sudo apt update && sudo apt install -y python3-pip
+pip3 install platformio
+# serial-port access without sudo:
+sudo usermod -a -G dialout $USER    # then log out and back in
+# udev rules so the USB serial adapter is detected correctly:
+curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules | sudo tee /etc/udev/rules.d/99-platformio-udev.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Verify with `pio --version`. Alternatively install the
+[PlatformIO IDE extension](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide)
+in VS Code — it bundles the CLI and adds Build/Upload/Monitor buttons.
+
+### Build & flash
 
 ```bash
 # clone
