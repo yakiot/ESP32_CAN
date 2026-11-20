@@ -1,4 +1,4 @@
-# Yakiot ESP32 CAN Firmware
+# Peko - Yakiot ESP32 CAN Firmware
 
 Open-source vehicle-telematics firmware for the Yakiot OBD + GNSS hardware
 (ESP32-based). It reads the vehicle CAN bus and streams parsed telemetry to
@@ -81,6 +81,45 @@ pio run -e passenger_obd2 -t monitor
 If auto-detection fails with multiple devices connected, uncomment
 `upload_port` in `platformio.ini` (e.g. `/dev/tty.usbserial-0001` on macOS,
 `/dev/ttyUSB0` on Linux, `COM3` on Windows).
+
+## Debugging
+
+Connect the ESP32 to your computer using a USB data cable. From the project
+folder, list serial devices and open the console at **115200 baud**:
+
+```bash
+pio device list
+pio device monitor --baud 115200
+```
+
+If multiple serial devices are attached, select the ESP32 port explicitly:
+
+```bash
+# macOS: replace with the port shown by pio device list
+pio device monitor --port /dev/cu.usbserial-0001 --baud 115200
+
+# Ubuntu: replace with the port shown by pio device list
+pio device monitor --port /dev/ttyUSB0 --baud 115200
+```
+
+With the monitor open, press the board's **EN / RESET** button. After BLE
+initializes, the startup log includes lines like these (address is an example):
+
+```text
+BLE address: aa:bb:cc:dd:ee:ff
+BLE service: 7e140001-8c55-4a82-b345-51fa952a6a01
+BLE telemetry: 7e140002-8c55-4a82-b345-51fa952a6a01
+```
+
+Copy your board's **BLE address**, not its Wi-Fi MAC, into Peko_demo's
+`AppConstant.BLE_MAC_ADDRESS`. Use uppercase hex for Android's address
+validation, for example `AA:BB:CC:DD:EE:FF`. This lets the app connect directly
+without running a BLE scan. The firmware advertises as **Yak-ELD**.
+
+The address prints once per boot; reset the board if you opened the monitor
+after startup. CAN frames and decoded readings appear afterward when vehicle
+data is received. Close the monitor with **Ctrl+C** before uploading firmware
+or opening another serial program on the same port.
 
 ## Documentation
 
